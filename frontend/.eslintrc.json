@@ -63,7 +63,7 @@
       "no-buffer-constructor": "error",
       "no-caller": "error",
       "no-confusing-arrow": "error",
-      "no-console": "warn",
+      "no-console": "off",
       "no-constructor-return": "error",
       "no-constant-condition": "error",
       "no-debugger": "warn",
@@ -129,20 +129,7 @@
       "padding-line-between-statements": "error",
       "prefer-arrow-callback": "warn",
       "prefer-const": "off", // Off for v1
-      "prefer-destructuring": [
-        // Off for v1
-        "warn",
-        {
-          "VariableDeclarator": {
-            "array": true,
-            "object": true
-          },
-          "AssignmentExpression": {
-            "array": false,
-            "object": false
-          }
-        }
-      ],
+      "prefer-destructuring": "off",
       "prefer-numeric-literals": "warn",
       "prefer-promise-reject-errors": "warn",
       "prefer-rest-params": "warn",
@@ -150,7 +137,7 @@
       "prefer-template": "warn",
       "radix": "off", // Off for v1
       "require-atomic-updates": "off",
-      "require-await": "warn", // Warn for v1
+      "require-await": "off", // Warn for v1
       "sort-keys": "off",
       "spaced-comment": [
         "warn",
