@@ -37,6 +37,8 @@ from src.shared.constants import (
     CHAT_SYSTEM_TEMPLATE, CHAT_TOKEN_CUT_OFF, CHAT_ENTITY_VECTOR_MODE,
     CHAT_GLOBAL_VECTOR_FULLTEXT_MODE, CHAT_SEARCH_KWARG_SCORE_THRESHOLD,CHAT_MODE_CONFIG_MAP, CHAT_DEFAULT_MODE, CHAT_GRAPH_MODE,CHAT_EMBEDDING_FILTER_SCORE_THRESHOLD, CHAT_DOC_SPLIT_SIZE, QUESTION_TRANSFORM_TEMPLATE
 )
+from src.graphrag import GRAPH_RAG_GLOBAL_MODES, process_graphrag_global_response
+from src.raptor import RAPTOR_MODES, process_raptor_response
 load_dotenv() 
 
 class SessionChatHistory:
@@ -673,6 +675,57 @@ def QA_RAG(graph, model, question, document_names, session_id, mode, write_acces
 
     if mode == CHAT_GRAPH_MODE:
         result = process_graph_response(model, graph, question, messages, history)
+    elif mode in GRAPH_RAG_GLOBAL_MODES:
+        document_names_list = list(map(str.strip, json.loads(document_names)))
+        if document_names_list:
+            result = {
+                "session_id": "",
+                "message": "Please deselect all documents in the table before using this chat mode",
+                "info": {
+                    "sources": [],
+                    "model": "",
+                    "nodedetails": [],
+                    "total_tokens": 0,
+                    "response_time": 0,
+                    "mode": mode,
+                    "entities": [],
+                    "metric_details": [],
+                },
+                "user": "chatbot",
+            }
+        else:
+            result = process_graphrag_global_response(
+                model, graph, question, messages, history, mode
+            )
+    elif mode in RAPTOR_MODES:
+        document_names_list = list(map(str.strip, json.loads(document_names)))
+        if document_names_list:
+            result = {
+                "session_id": "",
+                "message": "Please deselect all documents in the table before using this chat mode",
+                "info": {
+                    "sources": [],
+                    "model": "",
+                    "nodedetails": [],
+                    "total_tokens": 0,
+                    "response_time": 0,
+                    "mode": mode,
+                    "entities": [],
+                    "metric_details": [],
+                },
+                "user": "chatbot",
+            }
+        else:
+            result = process_raptor_response(
+                model,
+                graph,
+                question,
+                messages,
+                history,
+                mode,
+                embedding_provider=embedding_provider,
+                embedding_model=embedding_model,
+            )
     else:
         chat_mode_settings = get_chat_mode_settings(mode=mode)
         document_names= list(map(str.strip, json.loads(document_names)))

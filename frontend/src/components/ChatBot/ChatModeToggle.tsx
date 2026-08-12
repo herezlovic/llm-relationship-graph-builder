@@ -1,7 +1,13 @@
 import { StatusIndicator, Typography } from '@neo4j-ndl/react';
 import { useFileContext } from '../../context/UsersFiles';
 import CustomMenu from '../UI/CustomMenu';
-import { chatModeLables, chatModes as AvailableModes, chatModeReadableLables } from '../../utils/Constants';
+import {
+  chatModeLables,
+  chatModes as AvailableModes,
+  chatModeReadableLables,
+  COMMUNITY_CHAT_MODES,
+  RAPTOR_CHAT_MODES,
+} from '../../utils/Constants';
 import { capitalize } from '@mui/material';
 import { capitalizeWithPlus } from '../../utils/Utils';
 import { useCredentials } from '../../context/UserCredentials';
@@ -26,18 +32,23 @@ export default function ChatModeToggle({
 }) {
   const { setchatModes, chatModes, postProcessingTasks } = useFileContext();
   const isCommunityAllowed = postProcessingTasks.includes('enable_communities');
+  const isRaptorAllowed = postProcessingTasks.includes('enable_raptor');
   const { isGdsActive } = useCredentials();
   if (!chatModes.length) {
     setchatModes([chatModeLables['graph+vector+fulltext']]);
   }
 
   const memoizedChatModes = useMemo(() => {
-    return isGdsActive && isCommunityAllowed
-      ? AvailableModes
-      : AvailableModes?.filter(
-          (m: { mode: string | string[] }) => !m.mode.includes(chatModeLables['global search+vector+fulltext'])
-        );
-  }, [isGdsActive, isCommunityAllowed]);
+    return AvailableModes?.filter((m: { mode: string }) => {
+      if (COMMUNITY_CHAT_MODES.has(m.mode)) {
+        return isGdsActive && isCommunityAllowed;
+      }
+      if (RAPTOR_CHAT_MODES.has(m.mode)) {
+        return isRaptorAllowed;
+      }
+      return true;
+    });
+  }, [isGdsActive, isCommunityAllowed, isRaptorAllowed]);
   const menuItems = useMemo(() => {
     return memoizedChatModes?.map(
       (

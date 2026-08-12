@@ -2,17 +2,22 @@ import { LoadingSpinner, Flex, Typography, TextLink } from '@neo4j-ndl/react';
 import { FC, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { CommunitiesProps } from '../../types';
-import { chatModeLables } from '../../utils/Constants';
+import { COMMUNITY_CHAT_MODES, RAPTOR_CHAT_MODES } from '../../utils/Constants';
 import GraphViewModal from '../Graph/GraphViewModal';
 import { handleGraphNodeClick } from './chatInfo';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+
 const CommunitiesInfo: FC<CommunitiesProps> = ({ loading, communities, mode }) => {
   const [neoNodes, setNeoNodes] = useState<any[]>([]);
   const [neoRels, setNeoRels] = useState<any[]>([]);
   const [openGraphView, setOpenGraphView] = useState(false);
   const [viewPoint, setViewPoint] = useState('');
   const [loadingGraphView, setLoadingGraphView] = useState(false);
+  const isCommunityMode = COMMUNITY_CHAT_MODES.has(mode);
+  const isRaptorMode = RAPTOR_CHAT_MODES.has(mode);
+  const showScore = isCommunityMode || isRaptorMode;
+  const emptyLabel = isRaptorMode ? 'No RAPTOR Nodes Found' : 'No Communities Found';
 
   const handleCommunityClick = (elementId: string, viewMode: string) => {
     handleGraphNodeClick(
@@ -39,24 +44,42 @@ const CommunitiesInfo: FC<CommunitiesProps> = ({ loading, communities, mode }) =
               <li key={`${community.id}${index}`} className='mb-2'>
                 <div>
                   <Flex flexDirection='row' gap='2'>
-                    <TextLink
-                      className={`${loadingGraphView ? 'cursor-wait' : 'cursor-pointer'}`}
-                      htmlAttributes={{
-                        onClick: () => handleCommunityClick(community.element_id, 'chatInfoView'),
-                      }}
-                    >{`ID : ${community.id}`}</TextLink>
+                    {community.element_id ? (
+                      <TextLink
+                        className={`${loadingGraphView ? 'cursor-wait' : 'cursor-pointer'}`}
+                        htmlAttributes={{
+                          onClick: () => handleCommunityClick(community.element_id, 'chatInfoView'),
+                        }}
+                      >{`ID : ${community.id}`}</TextLink>
+                    ) : (
+                      <Typography variant='subheading-medium'>{`ID : ${community.id}`}</Typography>
+                    )}
                   </Flex>
-                  {mode === chatModeLables['global search+vector+fulltext'] && community.score && (
+                  {isRaptorMode && community.layer !== undefined && community.layer !== null && (
                     <Flex flexDirection='row' gap='2'>
-                      <Typography variant='subheading-medium'>Score : </Typography>
-                      <Typography variant='subheading-medium'>{community.score}</Typography>
+                      <Typography variant='subheading-medium'>Layer : </Typography>
+                      <Typography variant='subheading-medium'>{community.layer}</Typography>
                     </Flex>
                   )}
-                  <div className='prose prose-sm sm:prose lg:prose-lg xl:prose-xl max-w-none'>
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw] as any}>
-                      {community.summary}
-                    </ReactMarkdown>
-                  </div>
+                  {showScore && community.score != null && (
+                    <Flex flexDirection='row' gap='2'>
+                      <Typography variant='subheading-medium'>Score : </Typography>
+                      <Typography variant='subheading-medium'>
+                        {typeof community.score === 'number'
+                          ? Number(community.score.toFixed(4))
+                          : community.score}
+                      </Typography>
+                    </Flex>
+                  )}
+                  {community.summary ? (
+                    <div className='prose prose-sm sm:prose lg:prose-lg xl:prose-xl max-w-none'>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw] as any}>
+                        {community.summary}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <></>
+                  )}
                 </div>
               </li>
             ))}
@@ -65,7 +88,7 @@ const CommunitiesInfo: FC<CommunitiesProps> = ({ loading, communities, mode }) =
       ) : (
         <Typography variant='h6' className='text-center'>
           {' '}
-          No Communities Found
+          {emptyLabel}
         </Typography>
       )}
       {openGraphView && (

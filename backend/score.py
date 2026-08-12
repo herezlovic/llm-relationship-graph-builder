@@ -23,11 +23,12 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from src.QA_integration import QA_RAG, clear_chat_history
 from src.api_response import create_api_response
 from src.chunkid_entities import get_entities_from_chunkids
-from src.communities import create_communities
+from src.communities import COMMUNITY_CREATION_DEFAULT_MODEL, create_communities
 from src.entities.source_extract_params import SourceScanExtractParams, get_source_scan_extract_params
 from src.entities.user_credential import Neo4jCredentials, get_neo4j_credentials
 from src.graphDB_dataAccess import graphDBdataAccess
 from src.graph_query import get_chunktext_results, get_graph_results, visualize_schema
+from src.graphrag.claims import CLAIM_EXTRACTION_DEFAULT_MODEL, extract_claims
 from src.logger import CustomLogger
 from src.main import (
     connection_check_and_get_vector_dimensions, create_source_node_graph_url_gcs, create_source_node_graph_url_s3,
@@ -41,6 +42,7 @@ from src.main import (
 from src.neighbours import get_neighbour_nodes
 from src.post_processing import create_entity_embedding, create_vector_fulltext_indexes, graph_schema_consolidation
 from src.ragas_eval import get_additional_metrics, get_ragas_metrics
+from src.raptor import create_raptor_index
 from src.shared.common_fn import formatted_time, get_value_from_env, get_remaining_token_limits, get_user_embedding_model, change_user_embedding_model
 from src.shared.llm_graph_builder_exception import LLMGraphBuilderException
 from Secweb.XContentTypeOptions import XContentTypeOptions
@@ -360,11 +362,52 @@ async def post_processing(credentials: Neo4jCredentials = Depends(get_neo4j_cred
             await asyncio.to_thread(graph_schema_consolidation, graph)
             api_name = 'post_processing/graph_schema_consolidation'
             logging.info(f'Updated nodes and relationship labels')
+
+        if "extract_claims" in tasks:
+            api_name = 'extract_claims'
+            claim_model = get_value_from_env(
+                "CLAIM_EXTRACTION_MODEL", CLAIM_EXTRACTION_DEFAULT_MODEL
+            )
+            await asyncio.to_thread(
+                extract_claims,
+                graph,
+                claim_model,
+                credentials.email,
+            )
+            logging.info('extracted claim covariates')
             
         if "enable_communities" in tasks:
             api_name = 'create_communities'
-            await asyncio.to_thread(create_communities, credentials.uri, credentials.userName, credentials.password, credentials.database, credentials.email, embedding_provider, embedding_model)
-            logging.info(f'created communities') 
+            community_model = get_value_from_env(
+                "COMMUNITY_CREATION_MODEL", COMMUNITY_CREATION_DEFAULT_MODEL
+            )
+            await asyncio.to_thread(
+                create_communities,
+                credentials.uri,
+                credentials.userName,
+                credentials.password,
+                credentials.database,
+                credentials.email,
+                community_model,
+                embedding_provider,
+                embedding_model,
+            )
+            logging.info('created communities')
+
+        if "enable_raptor" in tasks:
+            api_name = 'create_raptor_index'
+            raptor_model = get_value_from_env(
+                "RAPTOR_CREATION_MODEL", COMMUNITY_CREATION_DEFAULT_MODEL
+            )
+            await asyncio.to_thread(
+                create_raptor_index,
+                graph,
+                raptor_model,
+                embedding_provider,
+                embedding_model,
+                credentials.email,
+            )
+            logging.info('created RAPTOR index')
 
         graphDb_data_Access = graphDBdataAccess(graph)
         document_name = ""
