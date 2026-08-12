@@ -45,6 +45,13 @@ export const chatModeLables = {
   unavailableChatMode: 'Chat mode is unavailable when files are selected',
   selected: 'Selected',
   'global search+vector+fulltext': 'global_vector',
+  'global map-reduce': 'global_map_reduce',
+  'global C0': 'global_c0',
+  'global C1': 'global_c1',
+  'global C2': 'global_c2',
+  'global C3': 'global_c3',
+  'raptor collapsed': 'raptor_collapsed',
+  'raptor tree': 'raptor_tree',
 };
 export const chatModeReadableLables: Record<string, string> = {
   vector: 'vector',
@@ -56,6 +63,13 @@ export const chatModeReadableLables: Record<string, string> = {
   unavailableChatMode: 'Chat mode is unavailable when files are selected',
   selected: 'Selected',
   global_vector: 'global search+vector+fulltext',
+  global_map_reduce: 'global map-reduce',
+  global_c0: 'global C0',
+  global_c1: 'global C1',
+  global_c2: 'global C2',
+  global_c3: 'global C3',
+  raptor_collapsed: 'raptor collapsed',
+  raptor_tree: 'raptor tree',
 };
 export const chatModes = import.meta.env?.VITE_CHAT_MODES?.trim()
   ? import.meta.env.VITE_CHAT_MODES?.split(',').map((mode: string) => ({
@@ -91,6 +105,35 @@ export const chatModes = import.meta.env?.VITE_CHAT_MODES?.trim()
         mode: chatModeLables['global search+vector+fulltext'],
         description:
           'Use vector and full-text indexing on community nodes to provide accurate, context-aware answers globally.',
+      },
+      {
+        mode: chatModeLables['global map-reduce'],
+        description:
+          'GraphRAG Local-to-Global map-reduce over community summaries with helpfulness scoring and reduction.',
+      },
+      {
+        mode: chatModeLables['global C0'],
+        description: 'GraphRAG map-reduce using root-level (C0) community summaries.',
+      },
+      {
+        mode: chatModeLables['global C1'],
+        description: 'GraphRAG map-reduce using high-level (C1) community summaries.',
+      },
+      {
+        mode: chatModeLables['global C2'],
+        description: 'GraphRAG map-reduce using intermediate (C2) community summaries.',
+      },
+      {
+        mode: chatModeLables['global C3'],
+        description: 'GraphRAG map-reduce using leaf-level (C3) community summaries.',
+      },
+      {
+        mode: chatModeLables['raptor collapsed'],
+        description: 'RAPTOR collapsed-tree retrieval across all hierarchical summary layers.',
+      },
+      {
+        mode: chatModeLables['raptor tree'],
+        description: 'RAPTOR layer-by-layer tree traversal retrieval for multi-level context.',
       },
     ];
 
@@ -272,6 +315,11 @@ export const POST_PROCESSING_JOBS: { title: string; description: string }[] = [
   {
     title: 'enable_communities',
     description: 'Enable community creation across entities to use GraphRAG capabilities both local and global search.',
+  },
+  {
+    title: 'enable_raptor',
+    description:
+      'Build a RAPTOR tree over document chunks with recursive clustering and abstractive summarization for multi-level retrieval.',
   },
   {
     title: 'graph_schema_consolidation',

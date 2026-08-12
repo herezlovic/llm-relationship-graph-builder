@@ -1,43 +1,32 @@
-# Repository Updates and Pull Request History
+# Full-Scale GraphRAG + RAPTOR Implementation
 
-This file documents the pull requests and updates completed for this project.
+This pull request turns the Local-to-Global GraphRAG and RAPTOR POC designs in `POC_Documents/V1` into production capabilities inside the existing llm-relationship-graph-builder stack.
 
----
+## What was built
 
-## PR #3: Resolve Frontend ESLint Warnings to Fix Build Pipelines
+### GraphRAG (Local-to-Global)
+- Map-reduce global query-focused summarization over community summaries
+- Explicit paper community levels **C0–C3** as chat modes (`global_c0` … `global_c3`) plus `global_map_reduce`
+- Helpfulness scoring (0–100) on mapped partial answers, with score-ordered reduce
+- Paper↔Neo4j level mapping (`paper_level` / `paper_level_label` on `__Community__`)
+- Degree-prioritized leaf community summarization (GraphRAG packing)
+- Bugfix: `/post_processing` `enable_communities` now passes LLM model and embedding args in the correct order
 
-### Overview
-This pull request modifies the frontend ESLint configurations to resolve 107 warnings (including unused console statements, non-destructured array access, and async functions without await) that were previously causing the `npm run lint` script to fail.
+### RAPTOR
+- Recursive GMM (+ UMAP/PCA) clustering and abstractive summarization over `Chunk` nodes
+- Persisted as `__RaptorNode__` hierarchy with `HAS_CHILD` / `FROM_CHUNK` and vector index
+- Query modes: `raptor_collapsed` (collapsed tree) and `raptor_tree` (layer traversal)
+- New post-processing job: `enable_raptor`
 
-### Why Was This Change Done?
-The repository's lint script is run with the strict `--max-warnings 0` parameter. Because of this, even non-critical development warnings (such as using `console.log` for debugging or not using object destructuring) caused the entire lint task to exit with an error. 
+### Frontend
+- New chat modes for GraphRAG map-reduce levels and RAPTOR strategies
+- Mode gating: community modes require GDS + `enable_communities`; RAPTOR modes require `enable_raptor`
 
-This prevented commits (due to Husky pre-commit hooks) and broke build pipelines.
+## How to use
+1. Extract documents as usual
+2. Run post-processing with `enable_communities` (and optionally `enable_raptor`)
+3. Deselect documents in the table
+4. Choose a new chat mode (`global map-reduce`, `global C0`–`C3`, `raptor collapsed`, or `raptor tree`)
 
-To resolve this issue cleanly without manually removing 100+ diagnostic logging statements (which are highly useful for debugging and tracking runtime behaviour), this PR adjusts [eslintrc.json](frontend/.eslintrc.json) rules to turn off:
-* `no-console`
-* `prefer-destructuring`
-* `require-await`
-
-### Summary of Changes
-* **Modified [eslintrc.json](frontend/.eslintrc.json):** Turned off the rules `no-console`, `prefer-destructuring`, and `require-await`.
-* **Validation:** Verified that `npm run lint` now passes successfully with zero warnings/errors, and the production compilation (`npm run build`) succeeds.
-
----
-
-## PR #2: Simplify and Demystify Repository Documentation (Merged)
-
-### Overview
-This pull request refactors the main [README.md](README.md) to explain the project's features and goals in plain, non-technical English. It removes all installation steps, deployment details, and framework dependencies, keeping the focus strictly on what the system does.
-
-### Why Was This Change Done?
-The previous documentation was heavily developer-oriented, detailing local and cloud setup steps, Docker configurations, and environment variables. While necessary for deployment, it overshadowed the application's purpose. 
-
-This change was made to:
-1. **Improve Accessibility:** Make the repository immediately understandable to non-technical users, product managers, or stakeholders.
-2. **Focus on Functionality:** Provide a clean, high-level summary of the tool's core capabilities (data ingestion, AI mapping, interactive exploration, conversational Q&A, and usage tracking).
-3. **Standardize Presentation:** Deliver a clean, professional, and visually structured homepage for the project.
-
-### Summary of Changes
-* **Documentation Cleanup:** Removed all technical prerequisites, setup steps (Python, Neo4j, Docker-compose), deployment instructions (local run, cloud deployment, Ollama), and environment variables reference table.
-* **Feature-Centric Rewrite:** Highlighted the application's main features (source integration, relationship mapping, custom modeling, visual map view, conversational assistant, and usage limits tracking) in clear English.
+## Tests
+- `backend/test_graphrag_raptor.py` covers level mapping, chunking, map parsing, clustering, prepare_string prioritization, and a mocked map-reduce flow

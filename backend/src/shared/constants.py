@@ -714,6 +714,17 @@ CHAT_GLOBAL_VECTOR_FULLTEXT_MODE = "global_vector"
 CHAT_GRAPH_MODE = "graph"
 CHAT_DEFAULT_MODE = "graph_vector_fulltext"
 
+# Full-scale GraphRAG map-reduce modes (handled in src.graphrag, not Neo4jVector config)
+CHAT_GLOBAL_MAP_REDUCE_MODE = "global_map_reduce"
+CHAT_GLOBAL_C0_MODE = "global_c0"
+CHAT_GLOBAL_C1_MODE = "global_c1"
+CHAT_GLOBAL_C2_MODE = "global_c2"
+CHAT_GLOBAL_C3_MODE = "global_c3"
+
+# RAPTOR modes (handled in src.raptor)
+CHAT_RAPTOR_COLLAPSED_MODE = "raptor_collapsed"
+CHAT_RAPTOR_TREE_MODE = "raptor_tree"
+
 CHAT_MODE_CONFIG_MAP= {
         CHAT_VECTOR_MODE : {
             "retrieval_query": VECTOR_SEARCH_QUERY,

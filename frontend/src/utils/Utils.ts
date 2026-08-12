@@ -444,6 +444,20 @@ export const getDescriptionForChatMode = (mode: string): string => {
       return 'Combines entity node vector indexing with graph connections for accurate entity-based search, providing the most relevant response.';
     case chatModeLables['global search+vector+fulltext']:
       return 'Use vector and full-text indexing on community nodes to provide accurate, context-aware answers globally.';
+    case chatModeLables['global map-reduce']:
+      return 'GraphRAG Local-to-Global map-reduce over community summaries with helpfulness scoring.';
+    case chatModeLables['global C0']:
+      return 'GraphRAG map-reduce using root-level (C0) community summaries.';
+    case chatModeLables['global C1']:
+      return 'GraphRAG map-reduce using high-level (C1) community summaries.';
+    case chatModeLables['global C2']:
+      return 'GraphRAG map-reduce using intermediate (C2) community summaries.';
+    case chatModeLables['global C3']:
+      return 'GraphRAG map-reduce using leaf-level (C3) community summaries.';
+    case chatModeLables['raptor collapsed']:
+      return 'RAPTOR collapsed-tree retrieval across all hierarchical summary layers.';
+    case chatModeLables['raptor tree']:
+      return 'RAPTOR layer-by-layer tree traversal retrieval for multi-level context.';
     default:
       return 'Chat mode description not available'; // Fallback description
   }
