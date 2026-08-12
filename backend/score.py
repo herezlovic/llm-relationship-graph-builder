@@ -28,6 +28,7 @@ from src.entities.source_extract_params import SourceScanExtractParams, get_sour
 from src.entities.user_credential import Neo4jCredentials, get_neo4j_credentials
 from src.graphDB_dataAccess import graphDBdataAccess
 from src.graph_query import get_chunktext_results, get_graph_results, visualize_schema
+from src.graphrag.claims import CLAIM_EXTRACTION_DEFAULT_MODEL, extract_claims
 from src.logger import CustomLogger
 from src.main import (
     connection_check_and_get_vector_dimensions, create_source_node_graph_url_gcs, create_source_node_graph_url_s3,
@@ -361,6 +362,19 @@ async def post_processing(credentials: Neo4jCredentials = Depends(get_neo4j_cred
             await asyncio.to_thread(graph_schema_consolidation, graph)
             api_name = 'post_processing/graph_schema_consolidation'
             logging.info(f'Updated nodes and relationship labels')
+
+        if "extract_claims" in tasks:
+            api_name = 'extract_claims'
+            claim_model = get_value_from_env(
+                "CLAIM_EXTRACTION_MODEL", CLAIM_EXTRACTION_DEFAULT_MODEL
+            )
+            await asyncio.to_thread(
+                extract_claims,
+                graph,
+                claim_model,
+                credentials.email,
+            )
+            logging.info('extracted claim covariates')
             
         if "enable_communities" in tasks:
             api_name = 'create_communities'

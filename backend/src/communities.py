@@ -10,7 +10,7 @@ from src.shared.common_fn import load_embedding_model,track_token_usage
 from src.shared.llm_graph_builder_exception import LLMGraphBuilderException
 
 COMMUNITY_PROJECTION_NAME = "communities"
-NODE_PROJECTION = "!Chunk&!Document&!__Community__"
+NODE_PROJECTION = "!Chunk&!Document&!__Community__&!__Claim__&!__RaptorNode__"
 NODE_PROJECTION_ENTITY = "__Entity__"
 MAX_WORKERS = 10
 MAX_COMMUNITY_LEVELS = 3 
@@ -62,13 +62,13 @@ CALL {
 RETURN count(*)
 """
 CREATE_COMMUNITY_RANKS = """
-MATCH (c:__Community__)<-[:IN_COMMUNITY*]-(:!Chunk&!Document&!__Community__)<-[HAS_ENTITY]-(:Chunk)<-[]-(d:Document)
+MATCH (c:__Community__)<-[:IN_COMMUNITY*]-(:!Chunk&!Document&!__Community__&!__Claim__&!__RaptorNode__)<-[HAS_ENTITY]-(:Chunk)<-[]-(d:Document)
 WITH c, count(distinct d) AS rank
 SET c.community_rank = rank;
 """
 
 CREATE_PARENT_COMMUNITY_RANKS = """
-MATCH (c:__Community__)<-[:PARENT_COMMUNITY*]-(:__Community__)<-[:IN_COMMUNITY*]-(:!Chunk&!Document&!__Community__)<-[HAS_ENTITY]-(:Chunk)<-[]-(d:Document)
+MATCH (c:__Community__)<-[:PARENT_COMMUNITY*]-(:__Community__)<-[:IN_COMMUNITY*]-(:!Chunk&!Document&!__Community__&!__Claim__&!__RaptorNode__)<-[HAS_ENTITY]-(:Chunk)<-[]-(d:Document)
 WITH c, count(distinct d) AS rank
 SET c.community_rank = rank;
 """
@@ -106,7 +106,19 @@ RETURN c.id AS communityId,
           end: endNode(r).id,
           description: r.description,
           combined_degree: size([(startNode(r))--() | 1]) + size([(endNode(r))--() | 1])
-       }] AS rels
+       }] AS rels,
+       [(n)-[:HAS_CLAIM]->(cl:__Claim__) WHERE n IN nodes | {
+          id: cl.id,
+          subject: cl.subject,
+          object: cl.object,
+          type: cl.type,
+          description: cl.description,
+          source_span: cl.source_span,
+          start_date: cl.start_date,
+          end_date: cl.end_date,
+          entity_id: n.id,
+          entity_ids: [(e2)-[:HAS_CLAIM]->(cl) WHERE e2 IN nodes | e2.id]
+       }] AS claims
 """
 
 SET_PAPER_COMMUNITY_LEVELS = """
@@ -132,14 +144,14 @@ SET c.summary = row.summary,
 """ 
 
 
-COMMUNITY_SYSTEM_TEMPLATE = "Given input triples, generate the information summary. No pre-amble."
+COMMUNITY_SYSTEM_TEMPLATE = "Given input triples and optional claim covariates, generate the information summary. No pre-amble."
 
 
 COMMUNITY_TEMPLATE = """
-Based on the provided nodes and relationships that belong to the same graph community,
+Based on the provided nodes, relationships, and claim covariates that belong to the same graph community,
 generate following output in exact format
 title: A concise title, no more than 4 words,
-summary: A natural language summary of the information
+summary: A natural language summary of the information. Incorporate relevant claims/covariates when present.
 {community_info}
 Example output:
 title: Example Title,

@@ -14,7 +14,7 @@ import time
 
 # Constants for Full-Text Indexes
 LABELS_QUERY = "CALL db.labels()"
-FILTER_LABELS = ["Chunk","Document","__Community__"]
+FILTER_LABELS = ["Chunk","Document","__Community__","__Claim__","__RaptorNode__"]
 FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX entities FOR (n{labels_str}) ON EACH [n.id, n.description];"
 HYBRID_SEARCH_FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX keyword FOR (n:Chunk) ON EACH [n.text]" 
 COMMUNITY_INDEX_FULL_TEXT_QUERY = "CREATE FULLTEXT INDEX community_keyword FOR (n:`__Community__`) ON EACH [n.summary]" 
