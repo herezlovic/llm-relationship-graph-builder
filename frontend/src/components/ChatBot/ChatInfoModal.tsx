@@ -14,7 +14,7 @@ import {
 import { DocumentDuplicateIconOutline, ClipboardDocumentCheckIconOutline } from '@neo4j-ndl/react/icons';
 import '../../styling/info.css';
 import Neo4jRetrievalLogo from '../../assets/images/Neo4jRetrievalLogo.png';
-import { ExtendedNode, chatInfoMessage } from '../../types';
+import { Community, ExtendedNode, chatInfoMessage } from '../../types';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import GraphViewButton from '../Graph/GraphViewButton';
 import { chunkEntitiesAPI } from '../../services/ChunkEntitiesInfo';
@@ -23,7 +23,15 @@ import ChunkInfo from './ChunkInfo';
 import EntitiesInfo from './EntitiesInfo';
 import SourcesInfo from './SourcesInfo';
 import CommunitiesInfo from './CommunitiesInfo';
-import { chatModeLables, chatModeReadableLables, mergeNestedObjects, llms } from '../../utils/Constants';
+import {
+  chatModeLables,
+  chatModeReadableLables,
+  COMMUNITY_CHAT_MODES,
+  GRAPH_RAG_MAP_REDUCE_MODES,
+  mergeNestedObjects,
+  llms,
+  RAPTOR_CHAT_MODES,
+} from '../../utils/Constants';
 import { Relationship } from '@neo4j-nvl/base';
 import { getChatMetrics } from '../../services/GetRagasMetric';
 import MetricsTab from './MetricsTab';
@@ -33,6 +41,22 @@ import MultiModeMetrics from './MultiModeMetrics';
 import getAdditionalMetrics from '../../services/AdditionalMetrics';
 import { withVisibility } from '../../HOC/WithVisibility';
 import MetricsCheckbox from './MetricsCheckbox';
+
+const communitiesFromNodeDetails = (nodeDetails: chatInfoMessage['nodeDetails']): Community[] => {
+  return (nodeDetails?.communitydetails ?? [])
+    .filter((c) => c?.id)
+    .map((c) => ({
+      id: c.id,
+      element_id: c.element_id ?? '',
+      summary: c.summary ?? c.text ?? '',
+      score: c.score,
+      layer: c.layer,
+      weight: 0,
+      level: c.layer ?? 0,
+      community_rank: 0,
+    }))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+};
 
 const ChatInfoModal: React.FC<chatInfoMessage> = ({
   sources,
@@ -60,6 +84,8 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
   activeChatmodes,
   metricError,
   multiModelMetrics,
+  graphrag,
+  raptor,
   saveNodes,
   saveChunks,
   saveChatRelationships,
@@ -72,10 +98,13 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
 }) => {
   const { breakpoints } = tokens;
   const isTablet = useMediaQuery(`(min-width:${breakpoints.xs}) and (max-width: ${breakpoints.lg})`);
+  const isCommunityRetrievalMode = COMMUNITY_CHAT_MODES.has(mode);
+  const isGraphRagMapReduceMode = GRAPH_RAG_MAP_REDUCE_MODES.has(mode);
+  const isRaptorMode = RAPTOR_CHAT_MODES.has(mode);
   const [activeTab, setActiveTab] = useState<number>(
     error?.length
       ? 10
-      : mode === chatModeLables['global search+vector+fulltext']
+      : isCommunityRetrievalMode || isRaptorMode
         ? 7
         : mode === chatModeLables.graph
           ? 4
@@ -127,6 +156,13 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
 
   useEffect(() => {
     const abortcontroller = new AbortController();
+    if (isRaptorMode) {
+      saveCommunities(communitiesFromNodeDetails(nodeDetails));
+      return () => {
+        setcopiedText(false);
+        abortcontroller.abort();
+      };
+    }
     if (
       (mode != chatModeLables.graph || error?.trim() !== '') &&
       (!nodes.length || !infoEntities.length || !chunks.length)
@@ -150,21 +186,27 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
           saveInfoEntitites(getNodes(nodesData, mode));
           saveNodes(getNodes(nodesData, mode));
           saveChatRelationships(relationshipsData ?? []);
-          saveCommunities(
-            (communitiesData ?? [])
-              .map((community: { element_id: string }) => {
-                const communityScore = nodeDetails?.communitydetails?.find(
-                  (c: { id: string }) => c.id === community.element_id
-                );
-                return {
-                  ...community,
-                  score: communityScore?.score ?? 1,
-                };
-              })
-              .sort((a: any, b: any) => b.score - a.score)
-          );
+          if ((communitiesData ?? []).length) {
+            saveCommunities(
+              (communitiesData ?? [])
+                .map((community: { element_id: string }) => {
+                  const communityScore = nodeDetails?.communitydetails?.find(
+                    (c: { id: string }) => c.id === community.element_id
+                  );
+                  return {
+                    ...community,
+                    score: communityScore?.score ?? 1,
+                  };
+                })
+                .sort((a: any, b: any) => b.score - a.score)
+            );
+          } else if (isCommunityRetrievalMode && nodeDetails?.communitydetails?.length) {
+            saveCommunities(communitiesFromNodeDetails(nodeDetails));
+          } else {
+            saveCommunities([]);
+          }
           saveChunks(
-            chunksData
+            (chunksData ?? [])
               .map((chunk: any) => {
                 const chunkScore = nodeDetails?.chunkdetails?.find((c: any) => c.id === chunk.id);
                 return {
@@ -177,11 +219,15 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
           toggleInfoLoading();
         } catch (error) {
           console.error('Error fetching information:', error);
+          // GraphRAG / community modes can still show IDs from the chat payload if the fetch fails
+          if (isCommunityRetrievalMode && nodeDetails?.communitydetails?.length) {
+            saveCommunities(communitiesFromNodeDetails(nodeDetails));
+          }
           toggleInfoLoading();
         }
       })();
     }
-    () => {
+    return () => {
       setcopiedText(false);
       if (metricsLoading) {
         toggleMetricsLoading();
@@ -308,6 +354,16 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
     () => activeChatmodes != null && Object.keys(activeChatmodes).length <= 1,
     [activeChatmodes]
   );
+  const showCommunitiesOnlyTabs = isCommunityRetrievalMode || isRaptorMode;
+  const communitiesTabLabel = isRaptorMode ? 'Retrieved Nodes' : 'Communities';
+  const partialAnswerCount = graphrag?.partial_answers?.length ?? 0;
+  const paperLevelLabel =
+    graphrag?.paper_level === null || graphrag?.paper_level === undefined
+      ? 'all'
+      : `C${graphrag.paper_level}`;
+  const neo4jLevelLabel =
+    graphrag?.neo4j_level === null || graphrag?.neo4j_level === undefined ? 'all' : String(graphrag.neo4j_level);
+
   return (
     <div className='n-bg-palette-neutral-bg-weak p-4'>
       <div className='flex! flex-row pb-6 items-center mb-2'>
@@ -330,6 +386,24 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
             </span>{' '}
             mode.
           </Typography>
+          {isGraphRagMapReduceMode && graphrag && (
+            <Typography variant='body-medium'>
+              GraphRAG level <span className='font-bold'>{paperLevelLabel}</span>
+              {' · '}
+              Neo4j level <span className='font-bold'>{neo4jLevelLabel}</span>
+              {' · '}
+              <span className='font-bold'>{partialAnswerCount}</span> partial answer
+              {partialAnswerCount === 1 ? '' : 's'}
+            </Typography>
+          )}
+          {isRaptorMode && raptor && (
+            <Typography variant='body-medium'>
+              RAPTOR strategy <span className='font-bold'>{raptor.strategy ?? mode}</span>
+              {' · '}
+              <span className='font-bold'>{raptor.nodes_used ?? communities.length}</span> node
+              {(raptor.nodes_used ?? communities.length) === 1 ? '' : 's'} retrieved
+            </Typography>
+          )}
         </div>
       </div>
       {error?.length > 0 ? (
@@ -338,8 +412,8 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
         </Banner>
       ) : (
         <Tabs size='large' fill='underline' onChange={onChangeTabs} value={activeTab}>
-          {mode === chatModeLables['global search+vector+fulltext'] ? (
-            <Tabs.Tab tabId={7}>Communities</Tabs.Tab>
+          {showCommunitiesOnlyTabs ? (
+            <Tabs.Tab tabId={7}>{communitiesTabLabel}</Tabs.Tab>
           ) : (
             <>
               {mode != chatModeLables.graph ? <Tabs.Tab tabId={3}>Sources used</Tabs.Tab> : <></>}
@@ -486,7 +560,7 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
             language='cypher'
           />
         </Tabs.TabPanel>
-        {mode === chatModeLables['entity search+vector'] || mode === chatModeLables['global search+vector+fulltext'] ? (
+        {mode === chatModeLables['entity search+vector'] || showCommunitiesOnlyTabs ? (
           <Tabs.TabPanel className='n-flex n-flex-col n-gap-token-4 n-p-token-6' value={activeTab} tabId={7}>
             <CommunitiesInfo loading={infoLoading} communities={communities} mode={mode} />
           </Tabs.TabPanel>

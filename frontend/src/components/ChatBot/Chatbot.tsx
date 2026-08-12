@@ -22,7 +22,9 @@ import {
   Entity,
   ExtendedNode,
   ExtendedRelationship,
+  GraphRAGInfo,
   Messages,
+  RaptorInfo,
   ResponseMode,
   metricstate,
   multimodelmetric,
@@ -90,6 +92,8 @@ const Chatbot: FC<ChatbotProps> = (props) => {
   const [metricDetails, setMetricDetails] = useState<metricstate | null>(null);
   const [infoEntities, setInfoEntities] = useState<Entity[]>([]);
   const [communities, setCommunities] = useState<Community[]>([]);
+  const [graphragInfo, setGraphragInfo] = useState<GraphRAGInfo | undefined>(undefined);
+  const [raptorInfo, setRaptorInfo] = useState<RaptorInfo | undefined>(undefined);
   const [infoLoading, toggleInfoLoading] = useReducer((s) => !s, false);
   const [metricsLoading, toggleMetricsLoading] = useReducer((s) => !s, false);
   const downloadLinkRef = useRef<HTMLAnchorElement>(null);
@@ -262,6 +266,8 @@ const Chatbot: FC<ChatbotProps> = (props) => {
               metric_question: response.info?.metric_details?.question ?? '',
               metric_answer: response.info?.metric_details?.answer ?? '',
               metric_contexts: response.info?.metric_details?.contexts ?? '',
+              graphrag: response.info?.graphrag,
+              raptor: response.info?.raptor,
             };
             if (index === 0) {
               simulateTypingEffect(chatbotMessageId, responseMode, mode, responseMode.message);
@@ -403,6 +409,8 @@ const Chatbot: FC<ChatbotProps> = (props) => {
     setMetricQuestion(currentMode.metric_question ?? '');
     setMetricContext(currentMode.metric_contexts ?? '');
     setMetricAnswer(currentMode.metric_answer ?? '');
+    setGraphragInfo(currentMode.graphrag);
+    setRaptorInfo(currentMode.raptor);
     setActiveChat(chat);
     if (
       (previousActiveChat != null && chat.id != previousActiveChat?.id) ||
@@ -411,6 +419,7 @@ const Chatbot: FC<ChatbotProps> = (props) => {
       setNodes([]);
       setChunks([]);
       setInfoEntities([]);
+      setCommunities([]);
       setMetricDetails(null);
     }
     if (previousActiveChat != null && chat.id != previousActiveChat?.id) {
@@ -683,6 +692,8 @@ const Chatbot: FC<ChatbotProps> = (props) => {
             communities={communities}
             infoLoading={infoLoading}
             metricsLoading={metricsLoading}
+            graphrag={graphragInfo}
+            raptor={raptorInfo}
             saveInfoEntitites={saveInfoEntitites}
             saveChatRelationships={saveChatRelationships}
             saveChunks={saveChunks}

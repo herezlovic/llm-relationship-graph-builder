@@ -30,7 +30,8 @@ RAPTOR_MODES = {
 FETCH_ALL_RAPTOR_NODES = """
 MATCH (n:__RaptorNode__)
 WHERE n.embedding IS NOT NULL AND n.text IS NOT NULL
-RETURN n.id AS id,
+RETURN elementId(n) AS element_id,
+       n.id AS id,
        n.text AS text,
        n.layer AS layer,
        n.is_leaf AS is_leaf,
@@ -42,7 +43,8 @@ RETURN n.id AS id,
 FETCH_ROOT_RAPTOR_NODES = """
 MATCH (n:__RaptorNode__)
 WHERE n.embedding IS NOT NULL AND NOT EXISTS { (n)<-[:HAS_CHILD]-() }
-RETURN n.id AS id,
+RETURN elementId(n) AS element_id,
+       n.id AS id,
        n.text AS text,
        n.layer AS layer,
        n.is_leaf AS is_leaf,
@@ -54,7 +56,8 @@ RETURN n.id AS id,
 FETCH_CHILDREN = """
 MATCH (parent:__RaptorNode__ {id: $parent_id})-[:HAS_CHILD]->(child:__RaptorNode__)
 WHERE child.embedding IS NOT NULL
-RETURN child.id AS id,
+RETURN elementId(child) AS element_id,
+       child.id AS id,
        child.text AS text,
        child.layer AS layer,
        child.is_leaf AS is_leaf,
@@ -266,8 +269,11 @@ def process_raptor_response(
         community_like = [
             {
                 "id": node.get("id"),
+                "element_id": node.get("element_id"),
                 "score": node.get("score"),
                 "layer": node.get("layer"),
+                "text": node.get("text"),
+                "summary": node.get("text"),
             }
             for node in result.get("nodes") or []
         ]

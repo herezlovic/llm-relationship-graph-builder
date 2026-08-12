@@ -1,22 +1,17 @@
 import { StatusIndicator, Typography } from '@neo4j-ndl/react';
 import { useFileContext } from '../../context/UsersFiles';
 import CustomMenu from '../UI/CustomMenu';
-import { chatModeLables, chatModes as AvailableModes, chatModeReadableLables } from '../../utils/Constants';
+import {
+  chatModeLables,
+  chatModes as AvailableModes,
+  chatModeReadableLables,
+  COMMUNITY_CHAT_MODES,
+  RAPTOR_CHAT_MODES,
+} from '../../utils/Constants';
 import { capitalize } from '@mui/material';
 import { capitalizeWithPlus } from '../../utils/Utils';
 import { useCredentials } from '../../context/UserCredentials';
 import { JSXElementConstructor, ReactElement, ReactNode, ReactPortal, useMemo } from 'react';
-
-const COMMUNITY_CHAT_MODES = new Set([
-  chatModeLables['global search+vector+fulltext'],
-  chatModeLables['global map-reduce'],
-  chatModeLables['global C0'],
-  chatModeLables['global C1'],
-  chatModeLables['global C2'],
-  chatModeLables['global C3'],
-]);
-
-const RAPTOR_CHAT_MODES = new Set([chatModeLables['raptor collapsed'], chatModeLables['raptor tree']]);
 
 export default function ChatModeToggle({
   menuAnchor,

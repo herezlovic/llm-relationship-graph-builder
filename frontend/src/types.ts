@@ -230,6 +230,19 @@ export interface ChunkDetail {
   id: string;
   score: number;
 }
+export type GraphRAGInfo = {
+  paper_level?: number | null;
+  neo4j_level?: number | null;
+  max_neo4j_level?: number | null;
+  map_chunks?: number;
+  partial_answers?: { helpfulness?: number; answer?: string; community_ids?: string[] }[];
+};
+
+export type RaptorInfo = {
+  strategy?: string;
+  nodes_used?: number;
+};
+
 export type ResponseMode = {
   message: string;
   sources?: string[];
@@ -245,6 +258,8 @@ export type ResponseMode = {
   metric_question?: string;
   metric_contexts?: string;
   metric_answer?: string;
+  graphrag?: GraphRAGInfo;
+  raptor?: RaptorInfo;
 };
 export interface Messages {
   id: number;
@@ -525,6 +540,8 @@ export interface chatInfoMessage extends Partial<Messages> {
       }
     | undefined;
   multiModelMetrics: multimodelmetric[];
+  graphrag?: GraphRAGInfo;
+  raptor?: RaptorInfo;
   saveInfoEntitites: (entities: Entity[]) => void;
   saveNodes: (chatNodes: ExtendedNode[]) => void;
   saveChatRelationships: (chatRels: ExtendedRelationship[]) => void;
@@ -587,6 +604,7 @@ export type Community = {
   community_rank: number;
   score?: number;
   element_id: string;
+  layer?: number;
 };
 export type GroupedEntity = {
   texts: Set<string>;
@@ -845,7 +863,11 @@ export interface entity {
 
 export interface community {
   id: string;
-  score: number;
+  score?: number;
+  layer?: number;
+  text?: string;
+  summary?: string;
+  element_id?: string;
 }
 
 export interface nodeDetailsProps {

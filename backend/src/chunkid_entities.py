@@ -6,6 +6,11 @@ from src.graph_query import get_graphDB_driver
 from src.shared.constants import (
     CHAT_ENTITY_VECTOR_MODE,
     CHAT_GLOBAL_VECTOR_FULLTEXT_MODE,
+    CHAT_GLOBAL_MAP_REDUCE_MODE,
+    CHAT_GLOBAL_C0_MODE,
+    CHAT_GLOBAL_C1_MODE,
+    CHAT_GLOBAL_C2_MODE,
+    CHAT_GLOBAL_C3_MODE,
     CHUNK_QUERY,
     LOCAL_COMMUNITY_DETAILS_QUERY_PREFIX,
     LOCAL_COMMUNITY_DETAILS_QUERY_SUFFIX,
@@ -15,6 +20,15 @@ from src.shared.constants import (
     LOCAL_COMMUNITY_TOP_OUTSIDE_RELS,
     GLOBAL_COMMUNITY_DETAILS_QUERY
 )
+
+GRAPH_RAG_COMMUNITY_DETAIL_MODES = {
+    CHAT_GLOBAL_VECTOR_FULLTEXT_MODE,
+    CHAT_GLOBAL_MAP_REDUCE_MODE,
+    CHAT_GLOBAL_C0_MODE,
+    CHAT_GLOBAL_C1_MODE,
+    CHAT_GLOBAL_C2_MODE,
+    CHAT_GLOBAL_C3_MODE,
+}
 
 
 def process_records(records):
@@ -270,7 +284,7 @@ def get_entities_from_chunkids(credentials,nodedetails,entities,mode):
         nodedetails = json.loads(nodedetails)
         entities = json.loads(entities)
 
-        if mode == CHAT_GLOBAL_VECTOR_FULLTEXT_MODE:
+        if mode in GRAPH_RAG_COMMUNITY_DETAIL_MODES:
 
             if "communitydetails" in nodedetails and nodedetails["communitydetails"]:
                 community_ids = [item["id"] for item in nodedetails["communitydetails"]]
