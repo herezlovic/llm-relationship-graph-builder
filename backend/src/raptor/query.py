@@ -8,13 +8,13 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence
 
-import numpy as np
 from langchain_core.messages import AIMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from src.llm import get_llm
 from src.raptor.prompts import RAPTOR_QA_HUMAN, RAPTOR_QA_SYSTEM
+from src.raptor.ranking import rank_nodes, select_collapsed_nodes
 from src.shared.common_fn import get_value_from_env, load_embedding_model
 
 logger = logging.getLogger(__name__)
@@ -66,36 +66,8 @@ RETURN elementId(child) AS element_id,
        child.file_names AS file_names
 """
 
-CHARS_PER_TOKEN_ESTIMATE = 4
 DEFAULT_TOP_K = 5
 DEFAULT_CONTEXT_TOKENS = 2000
-
-
-def _cosine_similarity(query_vec: Sequence[float], doc_vec: Sequence[float]) -> float:
-    q = np.asarray(query_vec, dtype=np.float64)
-    d = np.asarray(doc_vec, dtype=np.float64)
-    denom = np.linalg.norm(q) * np.linalg.norm(d)
-    if denom == 0:
-        return 0.0
-    return float(np.dot(q, d) / denom)
-
-
-def _estimate_tokens(text: str) -> int:
-    return max(1, len(text or "") // CHARS_PER_TOKEN_ESTIMATE)
-
-
-def _rank_nodes(query_embedding: Sequence[float], nodes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    ranked = []
-    for node in nodes:
-        emb = node.get("embedding")
-        if not emb:
-            continue
-        score = _cosine_similarity(query_embedding, emb)
-        item = dict(node)
-        item["score"] = score
-        ranked.append(item)
-    ranked.sort(key=lambda n: n["score"], reverse=True)
-    return ranked
 
 
 def collapsed_tree_retrieve(
@@ -104,28 +76,15 @@ def collapsed_tree_retrieve(
     top_k: Optional[int] = None,
     max_context_tokens: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    top_k = top_k or get_value_from_env("RAPTOR_TOP_K", DEFAULT_TOP_K, "int")
-    max_context_tokens = max_context_tokens or get_value_from_env(
-        "RAPTOR_CONTEXT_TOKENS", DEFAULT_CONTEXT_TOKENS, "int"
-    )
+    if top_k is None:
+        top_k = get_value_from_env("RAPTOR_TOP_K", DEFAULT_TOP_K, "int")
+    if max_context_tokens is None:
+        max_context_tokens = get_value_from_env(
+            "RAPTOR_CONTEXT_TOKENS", DEFAULT_CONTEXT_TOKENS, "int"
+        )
     nodes = [dict(row) for row in graph.query(FETCH_ALL_RAPTOR_NODES)]
-    ranked = _rank_nodes(query_embedding, nodes)
-
-    selected: List[Dict[str, Any]] = []
-    used = 0
-    for node in ranked:
-        tokens = _estimate_tokens(node.get("text") or "")
-        if selected and used + tokens > max_context_tokens:
-            if len(selected) >= top_k:
-                break
-            # Still allow filling top_k with smaller nodes if budget remains tight
-            if used >= max_context_tokens:
-                break
-        selected.append(node)
-        used += tokens
-        if len(selected) >= max(top_k, 1) and used >= max_context_tokens:
-            break
-    return selected
+    ranked = rank_nodes(query_embedding, nodes)
+    return select_collapsed_nodes(ranked, top_k=top_k, max_context_tokens=max_context_tokens)
 
 
 def tree_traversal_retrieve(
@@ -133,14 +92,16 @@ def tree_traversal_retrieve(
     query_embedding: Sequence[float],
     top_k: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
-    top_k = top_k or get_value_from_env("RAPTOR_TOP_K", DEFAULT_TOP_K, "int")
+    if top_k is None:
+        top_k = get_value_from_env("RAPTOR_TOP_K", DEFAULT_TOP_K, "int")
+    top_k = max(1, int(top_k))
     roots = [dict(row) for row in graph.query(FETCH_ROOT_RAPTOR_NODES)]
     if not roots:
         # Fall back to collapsed retrieval if hierarchy links are missing.
         return collapsed_tree_retrieve(graph, query_embedding, top_k=top_k)
 
     selected: List[Dict[str, Any]] = []
-    current_layer_nodes = _rank_nodes(query_embedding, roots)[:top_k]
+    current_layer_nodes = rank_nodes(query_embedding, roots)[:top_k]
     selected.extend(current_layer_nodes)
 
     visited_layers = 0
@@ -148,18 +109,23 @@ def tree_traversal_retrieve(
     while current_layer_nodes and visited_layers < max_layers:
         children: List[Dict[str, Any]] = []
         for parent in current_layer_nodes:
-            child_rows = graph.query(FETCH_CHILDREN, params={"parent_id": parent["id"]})
+            parent_id = parent.get("id")
+            if not parent_id:
+                continue
+            child_rows = graph.query(FETCH_CHILDREN, params={"parent_id": parent_id})
             children.extend(dict(row) for row in child_rows)
         if not children:
             break
-        current_layer_nodes = _rank_nodes(query_embedding, children)[:top_k]
+        current_layer_nodes = rank_nodes(query_embedding, children)[:top_k]
         selected.extend(current_layer_nodes)
         visited_layers += 1
 
     # De-duplicate by id, keep highest score
     best: Dict[str, Dict[str, Any]] = {}
     for node in selected:
-        node_id = node["id"]
+        node_id = node.get("id")
+        if not node_id:
+            continue
         if node_id not in best or node.get("score", 0) > best[node_id].get("score", 0):
             best[node_id] = node
     ordered = sorted(best.values(), key=lambda n: n.get("score", 0), reverse=True)

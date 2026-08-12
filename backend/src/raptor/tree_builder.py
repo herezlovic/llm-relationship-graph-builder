@@ -13,6 +13,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from src.llm import get_llm
 from src.raptor.clustering import recursive_cluster_indices
 from src.raptor.prompts import RAPTOR_SUMMARY_HUMAN, RAPTOR_SUMMARY_SYSTEM
+from src.raptor.ranking import has_embedding
 from src.shared.common_fn import get_value_from_env, load_embedding_model
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ CHARS_PER_TOKEN_ESTIMATE = 4
 DEFAULT_SUMMARY_TOKEN_LIMIT = 3500
 DEFAULT_MAX_CLUSTERS = 10
 DEFAULT_MAX_LAYERS = 5
+DEFAULT_STORE_BATCH_SIZE = 50
 
 DROP_RAPTOR_NODES = f"MATCH (n:{RAPTOR_NODE_LABEL}) DETACH DELETE n"
 
@@ -84,6 +86,25 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text or "") // CHARS_PER_TOKEN_ESTIMATE)
 
 
+def _safe_embed(embeddings_model, text: str) -> Optional[List[float]]:
+    """Embed text and return a list vector, or None if embedding is unusable."""
+    if not text or not str(text).strip():
+        return None
+    try:
+        embedding = embeddings_model.embed_query(text)
+    except Exception as exc:
+        logger.error("Embedding failed for RAPTOR node: %s", exc)
+        return None
+    if not has_embedding(embedding):
+        return None
+    # Normalize to a plain list of floats for Neo4j vector props / clustering.
+    try:
+        return [float(x) for x in embedding]
+    except (TypeError, ValueError) as exc:
+        logger.error("Invalid embedding values for RAPTOR node: %s", exc)
+        return None
+
+
 def _summarize_cluster(chain, passages: Sequence[str]) -> str:
     joined = "\n\n----\n\n".join(passages)
     return chain.invoke({"passages": joined}).strip()
@@ -99,6 +120,14 @@ def _build_summary_chain(llm):
     return prompt | llm | StrOutputParser()
 
 
+def _batch_query(graph, cypher: str, rows: List[Dict[str, Any]], batch_size: int = DEFAULT_STORE_BATCH_SIZE) -> None:
+    if not rows:
+        return
+    size = max(1, int(batch_size))
+    for i in range(0, len(rows), size):
+        graph.query(cypher, params={"rows": rows[i : i + size]})
+
+
 def clear_raptor_index(graph) -> None:
     graph.query(DROP_RAPTOR_NODES)
     try:
@@ -109,7 +138,7 @@ def clear_raptor_index(graph) -> None:
 
 def _fetch_chunks(graph) -> List[Dict[str, Any]]:
     rows = graph.query(FETCH_CHUNKS_QUERY)
-    return [dict(row) for row in rows if row.get("text")]
+    return [dict(row) for row in rows if row.get("text") and str(row.get("text")).strip()]
 
 
 def create_raptor_index(
@@ -143,10 +172,18 @@ def create_raptor_index(
     # Layer 0 = leaf nodes from chunks
     current_nodes: List[Dict[str, Any]] = []
     leaf_chunk_links: List[Dict[str, str]] = []
+    skipped_embeddings = 0
     for chunk in chunks:
-        node_id = str(uuid.uuid4())
+        element_id = chunk.get("element_id")
+        if not element_id:
+            skipped_embeddings += 1
+            continue
         text = chunk["text"]
-        embedding = embeddings_model.embed_query(text)
+        embedding = _safe_embed(embeddings_model, text)
+        if embedding is None:
+            skipped_embeddings += 1
+            continue
+        node_id = str(uuid.uuid4())
         current_nodes.append(
             {
                 "id": node_id,
@@ -160,8 +197,29 @@ def create_raptor_index(
             }
         )
         leaf_chunk_links.append(
-            {"leaf_id": node_id, "chunk_element_id": chunk["element_id"]}
+            {"leaf_id": node_id, "chunk_element_id": element_id}
         )
+
+    if skipped_embeddings:
+        logger.warning("Skipped %s chunks without usable embeddings for RAPTOR.", skipped_embeddings)
+
+    if not current_nodes:
+        logger.warning("No usable chunk embeddings for RAPTOR indexing.")
+        return {"layers": 0, "nodes": 0, "message": "No usable chunk embeddings"}
+
+    # Prefer observed embedding length when model metadata is missing/mismatched.
+    observed_dim = len(current_nodes[0]["embedding"])
+    try:
+        dimension = int(dimension) if dimension is not None else observed_dim
+    except (TypeError, ValueError):
+        dimension = observed_dim
+    if dimension != observed_dim:
+        logger.warning(
+            "Embedding dimension metadata (%s) != observed (%s); using observed.",
+            dimension,
+            observed_dim,
+        )
+        dimension = observed_dim
 
     all_nodes = list(current_nodes)
     parent_child_links: List[Dict[str, str]] = []
@@ -169,6 +227,12 @@ def create_raptor_index(
     layer = 0
     while layer < max_layers and len(current_nodes) > 1:
         layer += 1
+        # Drop any nodes that lost embeddings before clustering.
+        embeddable = [n for n in current_nodes if has_embedding(n.get("embedding"))]
+        if len(embeddable) < 2:
+            logger.info("Fewer than 2 embeddable RAPTOR nodes at layer %s; stopping.", layer)
+            break
+        current_nodes = embeddable
         vectors = [n["embedding"] for n in current_nodes]
         token_counts = [n["token_count"] for n in current_nodes]
         clusters = recursive_cluster_indices(
@@ -199,7 +263,14 @@ def create_raptor_index(
                 logger.error("RAPTOR summary failed: %s", exc)
                 summary = "\n".join(passages)[: max_tokens * CHARS_PER_TOKEN_ESTIMATE]
 
-            embedding = embeddings_model.embed_query(summary)
+            if not summary or not str(summary).strip():
+                summary = "\n".join(passages)[: max_tokens * CHARS_PER_TOKEN_ESTIMATE]
+
+            embedding = _safe_embed(embeddings_model, summary)
+            if embedding is None:
+                logger.error("Skipping RAPTOR parent node due to empty summary embedding.")
+                return None
+
             parent_id = str(uuid.uuid4())
             source_chunk_ids = []
             file_names = []
@@ -236,37 +307,37 @@ def create_raptor_index(
         if len(current_nodes) <= 1:
             break
 
-    # Persist nodes in batches
-    batch_size = 50
-    for i in range(0, len(all_nodes), batch_size):
-        batch = all_nodes[i : i + batch_size]
-        graph.query(STORE_RAPTOR_NODES, params={"rows": batch})
-
-    if parent_child_links:
-        for i in range(0, len(parent_child_links), batch_size):
-            graph.query(LINK_RAPTOR_CHILDREN, params={"rows": parent_child_links[i : i + batch_size]})
-
-    if leaf_chunk_links:
-        for i in range(0, len(leaf_chunk_links), batch_size):
-            graph.query(LINK_RAPTOR_TO_CHUNK, params={"rows": leaf_chunk_links[i : i + batch_size]})
+    # Persist nodes / links in batches (skip any rows still missing embeddings).
+    storeable = [n for n in all_nodes if has_embedding(n.get("embedding"))]
+    if len(storeable) < len(all_nodes):
+        logger.warning(
+            "Dropping %s RAPTOR nodes without embeddings before store.",
+            len(all_nodes) - len(storeable),
+        )
+    _batch_query(graph, STORE_RAPTOR_NODES, storeable, DEFAULT_STORE_BATCH_SIZE)
+    _batch_query(graph, LINK_RAPTOR_CHILDREN, parent_child_links, DEFAULT_STORE_BATCH_SIZE)
+    _batch_query(graph, LINK_RAPTOR_TO_CHUNK, leaf_chunk_links, DEFAULT_STORE_BATCH_SIZE)
 
     try:
         graph.query(DROP_RAPTOR_VECTOR_INDEX)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Could not drop RAPTOR vector index before recreate: %s", exc)
     try:
-        graph.query(CREATE_RAPTOR_VECTOR_INDEX, params={"dimension": int(dimension)})
+        if dimension and dimension > 0:
+            graph.query(CREATE_RAPTOR_VECTOR_INDEX, params={"dimension": int(dimension)})
+        else:
+            logger.warning("Skipping RAPTOR vector index create; invalid dimension=%s", dimension)
     except Exception as exc:
         logger.warning("Could not create RAPTOR vector index: %s", exc)
 
-    max_layer = max((n["layer"] for n in all_nodes), default=0)
+    max_layer = max((n["layer"] for n in storeable), default=0)
     result = {
-        "layers": max_layer + 1,
-        "nodes": len(all_nodes),
-        "leaves": sum(1 for n in all_nodes if n.get("is_leaf")),
+        "layers": (max_layer + 1) if storeable else 0,
+        "nodes": len(storeable),
+        "leaves": sum(1 for n in storeable if n.get("is_leaf")),
         "model": model_name,
         "embedding_dimension": dimension,
-        "message": "RAPTOR index created successfully",
+        "message": "RAPTOR index created successfully" if storeable else "No RAPTOR nodes stored",
     }
     logger.info("RAPTOR index created: %s", result)
     return result
