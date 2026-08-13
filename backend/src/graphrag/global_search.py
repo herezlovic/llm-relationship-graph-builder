@@ -49,6 +49,8 @@ CHAT_GLOBAL_C0_MODE = "global_c0"
 CHAT_GLOBAL_C1_MODE = "global_c1"
 CHAT_GLOBAL_C2_MODE = "global_c2"
 CHAT_GLOBAL_C3_MODE = "global_c3"
+# Paper comparison condition: map-reduce over source texts (not community summaries).
+CHAT_TS_MAP_REDUCE_MODE = "ts_map_reduce"
 
 GRAPH_RAG_GLOBAL_MODES = {
     CHAT_GLOBAL_MAP_REDUCE_MODE,
@@ -56,6 +58,7 @@ GRAPH_RAG_GLOBAL_MODES = {
     CHAT_GLOBAL_C1_MODE,
     CHAT_GLOBAL_C2_MODE,
     CHAT_GLOBAL_C3_MODE,
+    CHAT_TS_MAP_REDUCE_MODE,
 }
 
 MODE_TO_PAPER_LEVEL = {
@@ -64,11 +67,13 @@ MODE_TO_PAPER_LEVEL = {
     CHAT_GLOBAL_C2_MODE: 2,
     CHAT_GLOBAL_C3_MODE: 3,
     CHAT_GLOBAL_MAP_REDUCE_MODE: None,  # auto / env default
+    CHAT_TS_MAP_REDUCE_MODE: None,
 }
 
 DEFAULT_MAP_CHUNK_TOKENS = 3000
 DEFAULT_REDUCE_TOKEN_BUDGET = 8000
 DEFAULT_MAP_WORKERS = 8
+DEFAULT_TS_CHUNK_LIMIT = 500
 
 GET_MAX_COMMUNITY_LEVEL = """
 MATCH (c:__Community__)
@@ -102,12 +107,33 @@ RETURN elementId(c) AS id,
 ORDER BY c.level DESC, community_rank DESC, weight DESC
 """
 
+GET_SOURCE_CHUNK_TEXTS = """
+MATCH (c:Chunk)
+WHERE c.text IS NOT NULL AND trim(c.text) <> ''
+OPTIONAL MATCH (c)-[:PART_OF]->(d:Document)
+RETURN elementId(c) AS id,
+       coalesce(c.id, elementId(c)) AS community_id,
+       coalesce(d.fileName, 'chunk') AS title,
+       c.text AS summary,
+       0 AS level,
+       coalesce(c.position, 0) AS community_rank,
+       size(c.text) AS weight
+ORDER BY coalesce(d.fileName, ''), coalesce(c.position, 0)
+LIMIT $limit
+"""
+
 
 def _fetch_community_summaries(graph, neo4j_level: Optional[int]) -> List[Dict[str, Any]]:
     if neo4j_level is None:
         rows = graph.query(GET_ALL_COMMUNITY_SUMMARIES)
     else:
         rows = graph.query(GET_COMMUNITY_SUMMARIES_AT_LEVEL, params={"level": int(neo4j_level)})
+    return [dict(row) for row in rows if row.get("summary")]
+
+
+def _fetch_source_chunk_texts(graph) -> List[Dict[str, Any]]:
+    limit = get_value_from_env("GRAPHRAG_TS_CHUNK_LIMIT", DEFAULT_TS_CHUNK_LIMIT, "int")
+    rows = graph.query(GET_SOURCE_CHUNK_TEXTS, params={"limit": int(limit)})
     return [dict(row) for row in rows if row.get("summary")]
 
 
@@ -165,27 +191,43 @@ def run_global_map_reduce(
     model: str,
     question: str,
     paper_level: Optional[int] = None,
+    source: str = "communities",
 ) -> Dict[str, Any]:
     """
-    Execute Local-to-Global map-reduce over community summaries.
+    Execute Local-to-Global map-reduce over community summaries or source texts.
 
-    Returns dict with answer, communities used, partial answers, tokens estimate.
+    ``source``:
+      - ``communities`` (default): GraphRAG C0–C3 / global map-reduce
+      - ``chunks`` / ``ts``: paper TS condition — map-reduce over Chunk texts
     """
     start = time.time()
     llm, model_name, _ = get_llm(model)
-    max_level = _get_max_community_level(graph)
-    neo_level = resolve_paper_community_level(paper_level, max_level)
-    summaries = _fetch_community_summaries(graph, neo_level)
+    source_key = (source or "communities").strip().lower()
+    use_ts = source_key in {"chunks", "ts", "text", "source_texts"}
+
+    max_level = 0
+    neo_level = None
+    if use_ts:
+        summaries = _fetch_source_chunk_texts(graph)
+        empty_msg = "No source chunk texts are available. Extract documents first."
+    else:
+        max_level = _get_max_community_level(graph)
+        neo_level = resolve_paper_community_level(paper_level, max_level)
+        summaries = _fetch_community_summaries(graph, neo_level)
+        empty_msg = (
+            "No community summaries are available. Run the enable_communities post-processing job first."
+        )
 
     if not summaries:
         return {
-            "answer": "No community summaries are available. Run the enable_communities post-processing job first.",
+            "answer": empty_msg,
             "model": model_name,
             "communities": [],
             "partial_answers": [],
             "paper_level": paper_level,
             "neo4j_level": neo_level,
             "max_neo4j_level": max_level,
+            "source": "ts" if use_ts else "communities",
             "response_time": time.time() - start,
             "total_tokens": 0,
         }
@@ -207,13 +249,18 @@ def run_global_map_reduce(
 
     if not partials:
         return {
-            "answer": "I could not find helpful community evidence to answer that question.",
+            "answer": (
+                "I could not find helpful source-text evidence to answer that question."
+                if use_ts
+                else "I could not find helpful community evidence to answer that question."
+            ),
             "model": model_name,
             "communities": [s.get("id") for s in summaries if s.get("id")],
             "partial_answers": [],
             "paper_level": paper_level,
             "neo4j_level": neo_level,
             "max_neo4j_level": max_level,
+            "source": "ts" if use_ts else "communities",
             "response_time": time.time() - start,
             "total_tokens": 0,
         }
@@ -252,6 +299,7 @@ def run_global_map_reduce(
         "neo4j_level": neo_level,
         "max_neo4j_level": max_level,
         "map_chunks": len(chunks),
+        "source": "ts" if use_ts else "communities",
         "response_time": time.time() - start,
         "total_tokens": 0,
     }
@@ -280,10 +328,13 @@ def process_graphrag_global_response(
     history,
     mode: str,
 ):
-    """Chat adapter for GraphRAG map-reduce modes."""
+    """Chat adapter for GraphRAG map-reduce modes (including paper TS)."""
     try:
         paper_level = _paper_level_for_mode(mode)
-        result = run_global_map_reduce(graph, model, question, paper_level=paper_level)
+        source = "ts" if mode == CHAT_TS_MAP_REDUCE_MODE else "communities"
+        result = run_global_map_reduce(
+            graph, model, question, paper_level=paper_level, source=source
+        )
         content = result["answer"]
         ai_response = AIMessage(content=content)
         messages.append(ai_response)
@@ -321,6 +372,7 @@ def process_graphrag_global_response(
                     "max_neo4j_level": result.get("max_neo4j_level"),
                     "map_chunks": result.get("map_chunks"),
                     "partial_answers": result.get("partial_answers"),
+                    "source": result.get("source"),
                 },
             },
             "user": "chatbot",

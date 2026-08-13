@@ -720,6 +720,8 @@ CHAT_GLOBAL_C0_MODE = "global_c0"
 CHAT_GLOBAL_C1_MODE = "global_c1"
 CHAT_GLOBAL_C2_MODE = "global_c2"
 CHAT_GLOBAL_C3_MODE = "global_c3"
+# Paper TS condition: map-reduce over source Chunk texts (no community index required)
+CHAT_TS_MAP_REDUCE_MODE = "ts_map_reduce"
 
 # RAPTOR modes (handled in src.raptor)
 CHAT_RAPTOR_COLLAPSED_MODE = "raptor_collapsed"

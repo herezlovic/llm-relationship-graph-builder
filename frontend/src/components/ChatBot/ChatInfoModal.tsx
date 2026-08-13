@@ -101,10 +101,11 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
   const isCommunityRetrievalMode = COMMUNITY_CHAT_MODES.has(mode);
   const isGraphRagMapReduceMode = GRAPH_RAG_MAP_REDUCE_MODES.has(mode);
   const isRaptorMode = RAPTOR_CHAT_MODES.has(mode);
+  const isTsMapReduceMode = mode === chatModeLables['ts map-reduce'];
   const [activeTab, setActiveTab] = useState<number>(
     error?.length
       ? 10
-      : isCommunityRetrievalMode || isRaptorMode
+      : isCommunityRetrievalMode || isRaptorMode || isTsMapReduceMode
         ? 7
         : mode === chatModeLables.graph
           ? 4
@@ -200,7 +201,10 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
                 })
                 .sort((a: any, b: any) => b.score - a.score)
             );
-          } else if (isCommunityRetrievalMode && nodeDetails?.communitydetails?.length) {
+          } else if (
+            (isCommunityRetrievalMode || isTsMapReduceMode) &&
+            nodeDetails?.communitydetails?.length
+          ) {
             saveCommunities(communitiesFromNodeDetails(nodeDetails));
           } else {
             saveCommunities([]);
@@ -220,7 +224,7 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
         } catch (error) {
           console.error('Error fetching information:', error);
           // GraphRAG / community modes can still show IDs from the chat payload if the fetch fails
-          if (isCommunityRetrievalMode && nodeDetails?.communitydetails?.length) {
+          if ((isCommunityRetrievalMode || isTsMapReduceMode) && nodeDetails?.communitydetails?.length) {
             saveCommunities(communitiesFromNodeDetails(nodeDetails));
           }
           toggleInfoLoading();
@@ -354,8 +358,8 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
     () => activeChatmodes != null && Object.keys(activeChatmodes).length <= 1,
     [activeChatmodes]
   );
-  const showCommunitiesOnlyTabs = isCommunityRetrievalMode || isRaptorMode;
-  const communitiesTabLabel = isRaptorMode ? 'Retrieved Nodes' : 'Communities';
+  const showCommunitiesOnlyTabs = isCommunityRetrievalMode || isRaptorMode || isTsMapReduceMode;
+  const communitiesTabLabel = isRaptorMode ? 'Retrieved Nodes' : isTsMapReduceMode ? 'Source Chunks' : 'Communities';
   const partialAnswerCount = graphrag?.partial_answers?.length ?? 0;
   const paperLevelLabel =
     graphrag?.paper_level === null || graphrag?.paper_level === undefined
@@ -388,9 +392,17 @@ const ChatInfoModal: React.FC<chatInfoMessage> = ({
           </Typography>
           {isGraphRagMapReduceMode && graphrag && (
             <Typography variant='body-medium'>
-              GraphRAG level <span className='font-bold'>{paperLevelLabel}</span>
-              {' · '}
-              Neo4j level <span className='font-bold'>{neo4jLevelLabel}</span>
+              {graphrag.source === 'ts' ? (
+                <>
+                  GraphRAG source <span className='font-bold'>TS (source texts)</span>
+                </>
+              ) : (
+                <>
+                  GraphRAG level <span className='font-bold'>{paperLevelLabel}</span>
+                  {' · '}
+                  Neo4j level <span className='font-bold'>{neo4jLevelLabel}</span>
+                </>
+              )}
               {' · '}
               <span className='font-bold'>{partialAnswerCount}</span> partial answer
               {partialAnswerCount === 1 ? '' : 's'}

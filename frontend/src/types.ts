@@ -236,6 +236,8 @@ export type GraphRAGInfo = {
   max_neo4j_level?: number | null;
   map_chunks?: number;
   partial_answers?: { helpfulness?: number; answer?: string; community_ids?: string[] }[];
+  /** ``communities`` (default) or ``ts`` for paper source-text map-reduce */
+  source?: string;
 };
 
 export type RaptorInfo = {

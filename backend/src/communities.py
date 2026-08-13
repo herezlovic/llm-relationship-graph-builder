@@ -97,6 +97,48 @@ RETURN c.id AS communityId,
        [n IN nodes | {
           id: n.id,
           description: n.description,
+          element_summary: n.element_summary,
+          type: [el IN labels(n) WHERE el <> '__Entity__'][0],
+          degree: size([(n)--() | 1])
+       }] AS nodes,
+       [r IN relationships | {
+          start: startNode(r).id,
+          type: type(r),
+          end: endNode(r).id,
+          description: r.description,
+          combined_degree: size([(startNode(r))--() | 1]) + size([(endNode(r))--() | 1])
+       }] AS rels,
+       [(n)-[:HAS_CLAIM]->(cl:__Claim__) WHERE n IN nodes | {
+          id: cl.id,
+          subject: cl.subject,
+          object: cl.object,
+          type: cl.type,
+          description: cl.description,
+          source_span: cl.source_span,
+          start_date: cl.start_date,
+          end_date: cl.end_date,
+          entity_id: n.id,
+          entity_ids: [(e2)-[:HAS_CLAIM]->(cl) WHERE e2 IN nodes | e2.id]
+       }] AS claims
+"""
+
+# Leaf community element packs under a specific parent (for level-1 substitution).
+GET_LEAF_ELEMENTS_UNDER_PARENT = """
+MATCH (p:`__Community__` {id: $parent_id})<-[:PARENT_COMMUNITY]-(leaf:`__Community__` {level: 0})
+MATCH (leaf)<-[:IN_COMMUNITY]-(e)
+WITH p, leaf, collect(e) AS nodes
+WHERE size(nodes) > 0
+CALL apoc.path.subgraphAll(nodes[0], {
+	whitelistNodes:nodes
+})
+YIELD relationships
+RETURN leaf.id AS communityId,
+       leaf.summary AS summary,
+       coalesce(leaf.title, '') AS title,
+       [n IN nodes | {
+          id: n.id,
+          description: n.description,
+          element_summary: n.element_summary,
           type: [el IN labels(n) WHERE el <> '__Entity__'][0],
           degree: size([(n)--() | 1])
        }] AS nodes,
@@ -129,6 +171,26 @@ SET c2.paper_level = max_level - c2.level,
     c2.paper_level_label = 'C' + toString(max_level - c2.level)
 """
 
+GET_MAX_STORED_COMMUNITY_LEVEL = """
+MATCH (c:__Community__)
+RETURN coalesce(max(c.level), 0) AS max_level
+"""
+
+# Direct children only — parents are summarized bottom-up one Leiden level at a time.
+GET_PARENT_COMMUNITY_INFO_AT_LEVEL = """
+MATCH (p:`__Community__` {level: $level})<-[:PARENT_COMMUNITY]-(c:`__Community__`)
+WHERE p.summary IS NULL AND c.summary IS NOT NULL
+WITH p, collect({
+  id: c.id,
+  summary: c.summary,
+  title: coalesce(c.title, ''),
+  level: c.level
+}) AS children
+WHERE size(children) > 0
+RETURN p.id AS communityId, p.level AS level, children
+"""
+
+# Legacy query kept for compatibility / tests that inspect module attributes.
 GET_PARENT_COMMUNITY_INFO = """
 MATCH (p:`__Community__`)<-[:PARENT_COMMUNITY*]-(c:`__Community__`)
 WHERE p.summary is null and c.summary is not null
@@ -316,7 +378,18 @@ def prepare_string(community_data, max_chars=12000):
 def process_community_info(community, chain, is_parent=False):
     try:
         if is_parent:
-            combined_text = " ".join(f"Summary {i+1}: {summary}" for i, summary in enumerate(community.get("texts", [])))
+            # Prefer pre-packed GraphRAG substitution context when available.
+            combined_text = community.get("packed_context") or ""
+            if not combined_text:
+                texts = community.get("texts") or []
+                if texts and isinstance(texts[0], dict):
+                    combined_text = " ".join(
+                        f"Summary {i+1}: {item.get('summary') or ''}" for i, item in enumerate(texts)
+                    )
+                else:
+                    combined_text = " ".join(
+                        f"Summary {i+1}: {summary}" for i, summary in enumerate(texts)
+                    )
         else:
             combined_text = prepare_string(community)
         summary_response = chain.invoke({'community_info': combined_text})
@@ -333,6 +406,49 @@ def process_community_info(community, chain, is_parent=False):
     except Exception as e:
         logging.error(f"Failed to process community {community.get('communityId', 'unknown')}: {e}")
         return None
+
+
+def _parent_token_budget() -> int:
+    return get_value_from_env("GRAPHRAG_PARENT_SUMMARY_TOKEN_BUDGET", 3000, "int")
+
+
+def _build_parent_subcommunities(gds, parent_row: dict) -> list:
+    """
+    Attach element_text packs for leaf children when available so higher-level
+    summarization can substitute sub-community summaries under the token budget.
+    """
+    from src.graphrag.helpers import prepare_community_string
+
+    children = list(parent_row.get("children") or [])
+    parent_id = parent_row.get("communityId")
+    parent_level = parent_row.get("level")
+    # Level 1 parents have leaf children — fetch element packs for substitution.
+    element_by_id = {}
+    if parent_level == 1 and parent_id:
+        try:
+            leaf_rows = gds.run_cypher(
+                GET_LEAF_ELEMENTS_UNDER_PARENT, params={"parent_id": parent_id}
+            )
+            for leaf in leaf_rows.to_dict(orient="records"):
+                element_by_id[leaf["communityId"]] = prepare_community_string(leaf)
+        except Exception as exc:
+            logging.warning(
+                "Could not fetch leaf elements for parent %s: %s", parent_id, exc
+            )
+
+    subcommunities = []
+    for child in children:
+        child_id = child.get("id")
+        subcommunities.append(
+            {
+                "id": child_id,
+                "summary": child.get("summary") or "",
+                "title": child.get("title") or "",
+                "element_text": element_by_id.get(child_id, ""),
+            }
+        )
+    return subcommunities
+
 
 def create_community_summaries(gds, model, email, uri):
     callback_handler = None
@@ -360,23 +476,69 @@ def create_community_summaries(gds, model, email, uri):
                 else:
                     logging.error("community summaries could not be processed.")
 
-        gds.run_cypher(STORE_COMMUNITY_SUMMARIES, params={"data": summaries})
+        if summaries:
+            gds.run_cypher(STORE_COMMUNITY_SUMMARIES, params={"data": summaries})
 
-        parent_community_info = gds.run_cypher(GET_PARENT_COMMUNITY_INFO)
+        # Bottom-up parent summarization with GraphRAG token-budget substitution.
+        from src.graphrag.helpers import build_higher_level_community_context
+
+        max_level_rows = gds.run_cypher(GET_MAX_STORED_COMMUNITY_LEVEL)
+        max_level = 0
+        if not max_level_rows.empty:
+            max_level = int(max_level_rows.iloc[0].get("max_level") or 0)
+
         parent_community_chain = get_community_chain(llm, is_parent=True)
+        budget = _parent_token_budget()
 
-        parent_summaries = []
-        with ThreadPoolExecutor() as executor:
-            futures = [executor.submit(process_community_info, community, parent_community_chain, is_parent=True) for community in parent_community_info.to_dict(orient="records")]
-            
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    parent_summaries.append(result)
-                else:
-                    logging.error("parent community summaries could not be processed.")
+        for level in range(1, max_level + 1):
+            parent_rows = gds.run_cypher(
+                GET_PARENT_COMMUNITY_INFO_AT_LEVEL, params={"level": level}
+            )
+            parent_records = parent_rows.to_dict(orient="records")
+            if not parent_records:
+                continue
 
-        gds.run_cypher(STORE_COMMUNITY_SUMMARIES, params={"data": parent_summaries})
+            prepared = []
+            for parent in parent_records:
+                subcommunities = _build_parent_subcommunities(gds, parent)
+                packed, meta = build_higher_level_community_context(
+                    subcommunities, max_tokens=budget
+                )
+                if not packed:
+                    # Fallback: concatenate child summaries
+                    packed = " ".join(
+                        f"Summary {i+1}: {c.get('summary') or ''}"
+                        for i, c in enumerate(parent.get("children") or [])
+                    )
+                parent = dict(parent)
+                parent["packed_context"] = packed
+                parent["pack_meta"] = meta
+                prepared.append(parent)
+                logging.info(
+                    "Parent %s level=%s pack substitutions=%s tokens≈%s",
+                    parent.get("communityId"),
+                    level,
+                    meta.get("substitutions"),
+                    meta.get("tokens"),
+                )
+
+            parent_summaries = []
+            with ThreadPoolExecutor() as executor:
+                futures = [
+                    executor.submit(
+                        process_community_info, community, parent_community_chain, True
+                    )
+                    for community in prepared
+                ]
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        parent_summaries.append(result)
+                    else:
+                        logging.error("parent community summaries could not be processed.")
+
+            if parent_summaries:
+                gds.run_cypher(STORE_COMMUNITY_SUMMARIES, params={"data": parent_summaries})
 
     except Exception as e:
         logging.error(f"Failed to create community summaries: {e}")

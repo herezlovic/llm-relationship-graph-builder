@@ -29,6 +29,10 @@ from src.entities.user_credential import Neo4jCredentials, get_neo4j_credentials
 from src.graphDB_dataAccess import graphDBdataAccess
 from src.graph_query import get_chunktext_results, get_graph_results, visualize_schema
 from src.graphrag.claims import CLAIM_EXTRACTION_DEFAULT_MODEL, extract_claims
+from src.graphrag.element_summaries import (
+    ELEMENT_SUMMARY_DEFAULT_MODEL,
+    consolidate_element_summaries,
+)
 from src.logger import CustomLogger
 from src.main import (
     connection_check_and_get_vector_dimensions, create_source_node_graph_url_gcs, create_source_node_graph_url_s3,
@@ -375,6 +379,21 @@ async def post_processing(credentials: Neo4jCredentials = Depends(get_neo4j_cred
                 credentials.email,
             )
             logging.info('extracted claim covariates')
+
+        if "consolidate_element_summaries" in tasks:
+            api_name = 'consolidate_element_summaries'
+            element_model = get_value_from_env(
+                "ELEMENT_SUMMARY_MODEL", ELEMENT_SUMMARY_DEFAULT_MODEL
+            )
+            await asyncio.to_thread(
+                consolidate_element_summaries,
+                graph,
+                element_model,
+                embedding_provider,
+                embedding_model,
+                credentials.email,
+            )
+            logging.info('consolidated GraphRAG element summaries')
             
         if "enable_communities" in tasks:
             api_name = 'create_communities'

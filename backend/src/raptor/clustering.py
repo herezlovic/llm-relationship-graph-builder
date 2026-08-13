@@ -137,12 +137,28 @@ def recursive_cluster_indices(
             final_clusters.append(members)
             continue
 
-        # If clustering did not shrink the member set, stop to avoid infinite recursion.
-        if len(members) == len(embeddings) and _depth > 0:
-            # Force-split by contiguous halves as a last resort.
+        # If clustering did not shrink the member set, force contiguous splits and
+        # keep recursing until each part fits the token budget (or is a singleton).
+        if len(members) == len(embeddings):
             mid = max(1, len(members) // 2)
-            final_clusters.append(members[:mid])
-            final_clusters.append(members[mid:])
+            halves = [members[:mid], members[mid:]]
+            for half in halves:
+                half_tokens = sum(token_counts[i] for i in half)
+                if len(half) <= 1 or half_tokens <= max_tokens or _depth + 1 >= _max_depth:
+                    final_clusters.append(half)
+                    continue
+                sub_embeddings = [embeddings[i] for i in half]
+                sub_tokens = [token_counts[i] for i in half]
+                sub_clusters = recursive_cluster_indices(
+                    sub_embeddings,
+                    sub_tokens,
+                    max_tokens=max_tokens,
+                    max_clusters=max_clusters,
+                    _depth=_depth + 1,
+                    _max_depth=_max_depth,
+                )
+                for sub in sub_clusters:
+                    final_clusters.append([half[i] for i in sub])
             continue
 
         sub_embeddings = [embeddings[i] for i in members]

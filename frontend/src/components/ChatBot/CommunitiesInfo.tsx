@@ -2,7 +2,7 @@ import { LoadingSpinner, Flex, Typography, TextLink } from '@neo4j-ndl/react';
 import { FC, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { CommunitiesProps } from '../../types';
-import { COMMUNITY_CHAT_MODES, RAPTOR_CHAT_MODES } from '../../utils/Constants';
+import { COMMUNITY_CHAT_MODES, RAPTOR_CHAT_MODES, chatModeLables } from '../../utils/Constants';
 import GraphViewModal from '../Graph/GraphViewModal';
 import { handleGraphNodeClick } from './chatInfo';
 import remarkGfm from 'remark-gfm';
@@ -16,8 +16,13 @@ const CommunitiesInfo: FC<CommunitiesProps> = ({ loading, communities, mode }) =
   const [loadingGraphView, setLoadingGraphView] = useState(false);
   const isCommunityMode = COMMUNITY_CHAT_MODES.has(mode);
   const isRaptorMode = RAPTOR_CHAT_MODES.has(mode);
+  const isTsMode = mode === chatModeLables['ts map-reduce'];
   const showScore = isCommunityMode || isRaptorMode;
-  const emptyLabel = isRaptorMode ? 'No RAPTOR Nodes Found' : 'No Communities Found';
+  const emptyLabel = isRaptorMode
+    ? 'No RAPTOR Nodes Found'
+    : isTsMode
+      ? 'No Source Chunks Found'
+      : 'No Communities Found';
 
   const handleCommunityClick = (elementId: string, viewMode: string) => {
     handleGraphNodeClick(

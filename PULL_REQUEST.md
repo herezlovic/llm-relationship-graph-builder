@@ -1,41 +1,43 @@
-# Full-Scale GraphRAG + RAPTOR Implementation
+# GraphRAG Index Fidelity + TS Map-Reduce
 
-This pull request turns the Local-to-Global GraphRAG and RAPTOR POC designs in `POC_Documents/V1` into production capabilities inside the existing llm-relationship-graph-builder stack.
+Continues the full-scale GraphRAG/RAPTOR work by closing the largest remaining
+Local-to-Global index-construction gaps and adding the paper's TS comparison mode.
 
 ## What was built
 
-### GraphRAG (Local-to-Global)
-- Map-reduce global query-focused summarization over community summaries
-- Explicit paper community levels **C0–C3** as chat modes (`global_c0` … `global_c3`) plus `global_map_reduce`
-- Helpfulness scoring (0–100) on mapped partial answers, with score-ordered reduce
-- Paper↔Neo4j level mapping (`paper_level` / `paper_level_label` on `__Community__`)
-- Degree-prioritized leaf community summarization (GraphRAG packing)
-- Optional **claim/covariate extraction** (`extract_claims`) → `__Claim__` nodes via `HAS_CLAIM`, included in leaf community summaries
-- Bug fix: `/post_processing` `enable_communities` now passes LLM model and embedding args in the correct order
+### Higher-level community summarization (token-budget substitution)
+- Parents are summarized **bottom-up, one Leiden level at a time**
+- Level-1 parents pack leaf **element texts** first; when over budget, the largest
+  sub-community element blocks are **substituted** with that sub-community's summary
+  (GraphRAG paper packing)
+- Env: `GRAPHRAG_PARENT_SUMMARY_TOKEN_BUDGET`
 
-### RAPTOR
-- Recursive GMM (+ UMAP/PCA) clustering and abstractive summarization over `Chunk` nodes
-- Persisted as `__RaptorNode__` hierarchy with `HAS_CHILD` / `FROM_CHUNK` and vector index
-- Pure ranking helpers for cosine / collapsed-tree selection
-- Query modes: `raptor_collapsed` (collapsed tree) and `raptor_tree` (layer traversal)
-- New post-processing job: `enable_raptor`
-- Hardened empty-embedding / batching / missing-id guards
+### Element-summary homogeneous clustering
+- New post-processing job: `consolidate_element_summaries`
+- Embeds entity descriptions → cosine connected-component clusters → LLM consolidates
+  multi-member clusters into `element_summary`
+- Leaf community prompts prefer `element_summary` over raw `description`
+- Env: `ELEMENT_SUMMARY_MODEL`, `GRAPHRAG_ELEMENT_SIMILARITY_THRESHOLD`,
+  `GRAPHRAG_ELEMENT_MAX_CLUSTER_SIZE`, `GRAPHRAG_ELEMENT_SUMMARY_WORKERS`
 
-### Frontend
-- New chat modes for GraphRAG map-reduce levels and RAPTOR strategies
-- Mode gating: community modes require GDS + `enable_communities`; RAPTOR modes require `enable_raptor`
-- Chat info modal surfaces GraphRAG level metadata and RAPTOR retrieved nodes (layer/score)
-- Post-processing jobs: `extract_claims`, `enable_raptor`
+### Paper TS map-reduce chat mode
+- New mode `ts_map_reduce` — same map-reduce/helpfulness/reduce path over **Chunk**
+  source texts (graph-free baseline from the Local-to-Global paper)
+- Always available in the UI (does not require GDS / `enable_communities`)
+- Chat info shows "TS (source texts)" metadata
+- Env: `GRAPHRAG_TS_CHUNK_LIMIT`
+- Note: paper **SS** remains the existing `vector` semantic-search mode
 
-## How to use
-1. Extract documents as usual
-2. Run post-processing with `extract_claims` (optional), `enable_communities`, and optionally `enable_raptor`
-3. Deselect documents in the table
-4. Choose a chat mode (`global map-reduce`, `global C0`–`C3`, `raptor collapsed`, or `raptor tree`)
+### Docs / wiring
+- Documented `CLAIM_EXTRACTION_MODEL` and new GraphRAG env vars in `backend/example.env`
+- Frontend post-processing checklist includes `consolidate_element_summaries`
 
-## Config
-See `backend/example.env` for GraphRAG/RAPTOR/claim env vars (`GRAPHRAG_*`, `RAPTOR_*`, `CLAIM_EXTRACTION_MODEL`, `COMMUNITY_CREATION_MODEL`, `RAPTOR_CREATION_MODEL`).
+## Suggested post-processing order
+1. `extract_claims` (optional)
+2. `consolidate_element_summaries` (optional, before communities)
+3. `enable_communities`
+4. `enable_raptor` (optional)
 
 ## Tests
-- `backend/test_graphrag_raptor.py` — helpers, clustering, ranking, score wiring (19 passed, 1 skipped without full LLM deps)
-- `backend/test_graphrag_claims.py` — claim parse/persist helpers (10 passed)
+- `backend/test_graphrag_index_fidelity.py` — clustering, packing, TS mode, wiring
+- Existing `test_graphrag_raptor.py` / `test_graphrag_claims.py` remain
