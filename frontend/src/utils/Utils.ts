@@ -454,6 +454,8 @@ export const getDescriptionForChatMode = (mode: string): string => {
       return 'GraphRAG map-reduce using intermediate (C2) community summaries.';
     case chatModeLables['global C3']:
       return 'GraphRAG map-reduce using leaf-level (C3) community summaries.';
+    case chatModeLables['ts map-reduce']:
+      return 'Paper TS baseline: map-reduce over source chunk texts without a graph community index.';
     case chatModeLables['raptor collapsed']:
       return 'RAPTOR collapsed-tree retrieval across all hierarchical summary layers.';
     case chatModeLables['raptor tree']:

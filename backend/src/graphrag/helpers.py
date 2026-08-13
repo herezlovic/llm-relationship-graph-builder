@@ -96,12 +96,76 @@ def _format_claim_line(claim: Dict[str, Any]) -> str:
     )
 
 
+def build_higher_level_community_context(
+    subcommunities: List[Dict[str, Any]],
+    max_tokens: int = 3000,
+) -> Tuple[str, Dict[str, Any]]:
+    """
+    GraphRAG higher-level community packing with sub-community substitution.
+
+    Start with each sub-community's element_text (or summary if elements absent).
+    While over the token budget, replace the largest remaining uns substituted
+    sub-community's element block with its shorter community summary.
+    """
+    max_tokens = max(1, int(max_tokens))
+    items: List[Dict[str, Any]] = []
+    for child in subcommunities or []:
+        summary = (child.get("summary") or "").strip()
+        element_text = (child.get("element_text") or "").strip()
+        use_elements = bool(element_text)
+        text = element_text if use_elements else summary
+        if not text:
+            continue
+        items.append(
+            {
+                "id": child.get("id"),
+                "title": child.get("title") or "",
+                "summary": summary,
+                "element_text": element_text,
+                "using_elements": use_elements and bool(summary),
+                "text": text,
+                "element_tokens": estimate_tokens(element_text) if element_text else estimate_tokens(summary),
+            }
+        )
+
+    if not items:
+        return "", {"substitutions": 0, "subcommunities_used": 0, "tokens": 0}
+
+    substitutions = 0
+    # Substitute largest element blocks first until under budget (or nothing left to substitute).
+    while True:
+        total = sum(estimate_tokens(item["text"]) for item in items)
+        if total <= max_tokens:
+            break
+        candidates = [item for item in items if item["using_elements"] and item.get("summary")]
+        if not candidates:
+            break
+        candidates.sort(key=lambda item: item["element_tokens"], reverse=True)
+        chosen = candidates[0]
+        chosen["text"] = chosen["summary"]
+        chosen["using_elements"] = False
+        substitutions += 1
+
+    blocks = []
+    for i, item in enumerate(items, start=1):
+        label = "elements" if item["using_elements"] else "summary"
+        title = item.get("title") or "Untitled"
+        blocks.append(f"[{i}] subcommunity={item.get('id')} title={title} ({label})\n{item['text']}")
+    packed = "\n\n----\n\n".join(blocks)
+    return packed, {
+        "substitutions": substitutions,
+        "subcommunities_used": len(items),
+        "tokens": estimate_tokens(packed),
+    }
+
+
 def prepare_community_string(community_data: Dict[str, Any], max_chars: int = 12000) -> str:
     """
     Degree-prioritized community prompt text (shared by communities + tests).
 
     GraphRAG leaf prioritization: relationships by combined degree, with claim
     covariates for involved entities included when present.
+    Prefers consolidated ``element_summary`` over raw ``description`` when set.
     """
     nodes = list(community_data.get("nodes") or [])
     nodes.sort(key=lambda node: node.get("degree") or 0, reverse=True)
@@ -109,7 +173,8 @@ def prepare_community_string(community_data: Dict[str, Any], max_chars: int = 12
     for node in nodes:
         node_id = node["id"]
         node_type = node.get("type")
-        node_description = f", description: {node['description']}" if node.get("description") else ""
+        description = node.get("element_summary") or node.get("description")
+        node_description = f", description: {description}" if description else ""
         degree = node.get("degree")
         degree_text = f", degree: {degree}" if degree is not None else ""
         nodes_description += f"id: {node_id}, type: {node_type}{node_description}{degree_text}\n"

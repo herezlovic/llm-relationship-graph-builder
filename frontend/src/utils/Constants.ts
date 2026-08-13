@@ -50,6 +50,7 @@ export const chatModeLables = {
   'global C1': 'global_c1',
   'global C2': 'global_c2',
   'global C3': 'global_c3',
+  'ts map-reduce': 'ts_map_reduce',
   'raptor collapsed': 'raptor_collapsed',
   'raptor tree': 'raptor_tree',
 };
@@ -68,6 +69,7 @@ export const chatModeReadableLables: Record<string, string> = {
   global_c1: 'global C1',
   global_c2: 'global C2',
   global_c3: 'global C3',
+  ts_map_reduce: 'ts map-reduce',
   raptor_collapsed: 'raptor collapsed',
   raptor_tree: 'raptor tree',
 };
@@ -89,7 +91,11 @@ export const GRAPH_RAG_MAP_REDUCE_MODES = new Set([
   chatModeLables['global C1'],
   chatModeLables['global C2'],
   chatModeLables['global C3'],
+  chatModeLables['ts map-reduce'],
 ]);
+
+/** Paper TS condition — map-reduce over source texts (no community index required) */
+export const TS_MAP_REDUCE_CHAT_MODES = new Set([chatModeLables['ts map-reduce']]);
 
 /** RAPTOR retrieval chat modes */
 export const RAPTOR_CHAT_MODES = new Set([
@@ -151,6 +157,11 @@ export const chatModes = import.meta.env?.VITE_CHAT_MODES?.trim()
       {
         mode: chatModeLables['global C3'],
         description: 'GraphRAG map-reduce using leaf-level (C3) community summaries.',
+      },
+      {
+        mode: chatModeLables['ts map-reduce'],
+        description:
+          'Paper TS baseline: map-reduce query-focused summarization over source chunk texts (no graph communities).',
       },
       {
         mode: chatModeLables['raptor collapsed'],
@@ -345,6 +356,11 @@ export const POST_PROCESSING_JOBS: { title: string; description: string }[] = [
     title: 'extract_claims',
     description:
       'Extract claim covariates (subject, object, type, description, source span) from chunk text and link them to entities for richer GraphRAG community summaries.',
+  },
+  {
+    title: 'consolidate_element_summaries',
+    description:
+      'Embed entity descriptions, cluster near-duplicates by cosine similarity, and LLM-consolidate each homogeneous cluster into a single element_summary used by community reports.',
   },
   {
     title: 'enable_raptor',
