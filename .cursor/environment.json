@@ -1,0 +1,17 @@
+{
+  "name": "LLM Relationship Graph Builder",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "backend",
+      "command": "cd backend && . .venv/bin/activate && uvicorn score:app --reload --host 0.0.0.0 --port 8000"
+    },
+    {
+      "name": "frontend",
+      "command": "cd frontend && yarn run dev"
+    }
+  ],
+  "ports": [8000, 5173, 7474, 7687]
+}
